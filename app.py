@@ -114,8 +114,9 @@ def confirm_subscription(token: str, db: Session = Depends(get_db)):
         return {"message": "Already confirmed!"}
 
     user.confirmed = True
-    db.commit()
     user.unsubscribe_token = secrets.token_urlsafe(32)
+    db.commit()
+
 
     return {"message": "Subscription confirmed! 🎉"}
 
@@ -147,6 +148,23 @@ def testemail():
         return {"error": str(e)}
 
 
+@app.get("/api/admin/confirmed-user-ids")
+def get_confirmed_user_ids(db: Session = Depends(get_db)):
+    """
+    Get just the IDs of confirmed users who are ready for emails
+    Perfect for looping through!
+    """
+    users = db.query(models.User.id).filter(models.User.confirmed == True).all()
+
+    # Extract just the IDs from the query result
+    user_ids = [user.id for user in users]
+
+    return {
+        "total": len(user_ids),
+        "user_ids": user_ids
+    }
+
+
 @app.get("/api/admin/all-users")
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).filter(models.User.confirmed == True).all()
@@ -163,7 +181,8 @@ def get_all_users(db: Session = Depends(get_db)):
             "daily_time": user.daily_time,
             "notes": user.notes,
             "confirmed": user.confirmed,
-            "created_at": user.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": user.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "unsubscribe_token": user.unsubscribe_token,
         })
 
     return {
