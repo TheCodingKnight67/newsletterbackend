@@ -32,7 +32,7 @@ def read_root():
     return {"message": "Welcome to the Newsletter API! 💖"}
 
 
-@app.post("api/subscribe", response_model=schemas.UserResponse)
+@app.post("/api/subscribe", response_model=schemas.UserResponse)
 def subscribe(user_data: schemas.UserSubscribe, db: Session = Depends(get_db)):
     print("🎬 Starting subscription process...")
 
@@ -82,7 +82,7 @@ def subscribe(user_data: schemas.UserSubscribe, db: Session = Depends(get_db)):
     return new_user
 
 
-@app.get("api/unsubscribe/{token}")
+@app.get("/api/unsubscribe/{token}")
 def unsubscribe(token: str, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.unsubscribe_token == token).first()
 
@@ -103,7 +103,7 @@ def unsubscribe(token: str, db: Session = Depends(get_db)):
         "character": character
     }
 
-@app.get("api/confirm/{token}")
+@app.get("/api/confirm/{token}")
 def confirm_subscription(token: str, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.confirmation_token == token).first()
 
@@ -148,7 +148,7 @@ def testemail():
         return {"error": str(e)}
 
 
-@app.get("api/admin/confirmed-user-ids")
+@app.get("/api/admin/confirmed-user-ids")
 def get_confirmed_user_ids(db: Session = Depends(get_db)):
     """
     Get just the IDs of confirmed users who are ready for emails
@@ -165,7 +165,7 @@ def get_confirmed_user_ids(db: Session = Depends(get_db)):
     }
 
 
-@app.get("api/admin/all-users")
+@app.get("/api/admin/all-users")
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).filter(models.User.confirmed == True).all()
 
