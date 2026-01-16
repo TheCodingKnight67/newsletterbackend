@@ -122,10 +122,6 @@ def confirm_subscription(token: str, db: Session = Depends(get_db)):
     return {"message": "Subscription confirmed! 🎉"}
 
 
-
-
-
-
 @app.post("/api/send-journal")
 def send_journal(journal_data: dict):
     """Send journal entry email without saving to database"""
@@ -133,18 +129,19 @@ def send_journal(journal_data: dict):
         email = journal_data.get('email')
         journal_entry = journal_data.get('journalEntry')
         style = journal_data.get('style')
-        
+        custom_background = journal_data.get('customBackground')
+
         if not email or not journal_entry or not style:
             raise HTTPException(status_code=400, detail="Missing required fields")
-        
-        # Sends the email
-        success = send_journal_email(email, journal_entry, style)
-        
+
+
+        success = send_journal_email(email, journal_entry, style, custom_background)
+
         if success:
             return {"message": "Journal sent successfully! 💌"}
         else:
             raise HTTPException(status_code=500, detail="Failed to send email")
-            
+
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

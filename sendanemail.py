@@ -3,6 +3,11 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
+from PIL import Image
+import io
+import base64
+from colorsys import rgb_to_hls
+
 load_dotenv()
 
 # Mailjet credentials
@@ -12,6 +17,105 @@ MAILJET_SENDER_EMAIL = os.getenv('MAILJET_SENDER_EMAIL')
 
 mailjet = Client(auth=(MAILJET_API_KEY, MAILJET_API_SECRET), version='v3.1')
 
+
+def get_average_color(image_data):
+    """Get the average/dominant color from an image"""
+    try:
+        # Decode base64 if it's a data URL
+        if 'base64,' in image_data:
+            image_data = image_data.split('base64,')[1]
+
+        img_bytes = base64.b64decode(image_data)
+        img = Image.open(io.BytesIO(img_bytes))
+
+        # Resize for faster processing
+        img = img.resize((100, 100))
+
+        # Get average color
+        pixels = list(img.getdata())
+        avg_color = tuple(sum(c) // len(pixels) for c in zip(*pixels))
+
+        return avg_color
+    except Exception as e:
+        print(f"Error analyzing image: {e}")
+        return (255, 255, 255)  # Default to white
+
+
+def get_contrast_color(bg_color):
+    """
+    Determine if text should be black or white based on background color
+    Uses relative luminance formula
+    """
+    r, g, b = bg_color
+
+    # Calculate relative luminance
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+
+    # If background is dark, use white text. If light, use black text
+    if luminance > 0.5:
+        return '#000000'  # Black text for light backgrounds
+    else:
+        return '#FFFFFF'  # White text for dark backgrounds
+
+
+def get_custom_template(journal_entry: str, background_image: str):
+    """Custom template with user-uploaded background"""
+
+    # scan the image to determine text color
+    avg_color = get_average_color(background_image)
+    text_color = get_contrast_color(avg_color)
+
+    # If text is white, add a semi transparent dark overlay for better readability
+    # If text is black, add a semi transparent light overlay
+    overlay_color = 'rgba(0, 0, 0, 0.5)' if text_color == '#FFFFFF' else 'rgba(255, 255, 255, 0.7)'
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{
+                font-family: 'Arial', sans-serif;
+                margin: 0;
+                padding: 40px;
+                background-image: url('{background_image}');
+                background-size: cover;
+                background-position: center;
+                background-attachment: fixed;
+            }}
+            .container {{
+                max-width: 600px;
+                margin: 0 auto;
+                background: {overlay_color};
+                padding: 40px;
+                border-radius: 20px;
+                backdrop-filter: blur(10px);
+            }}
+            h1 {{
+                color: {text_color};
+                font-size: 28px;
+                text-align: center;
+                margin-bottom: 20px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            }}
+            .content {{
+                color: {text_color};
+                font-size: 16px;
+                line-height: 1.8;
+                white-space: pre-wrap;
+                padding: 20px;
+                border-radius: 10px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎨 Your Custom Journal 🎨</h1>
+            <div class="content">{journal_entry}</div>
+        </div>
+    </body>
+    </html>
+    """
 
 def get_plain_template(journal_entry: str):
     """Simple, clean template"""
@@ -453,7 +557,7 @@ def get_super_happy_template(journal_entry: str):
     """
 
 
-def send_journal_email(user_email: str, journal_entry: str, style: str):
+def send_journal_email(user_email: str, journal_entry: str, style: str,custom_background: str = None):
     """Send journal entry with the chosen style"""
     
     # Pick the template based on style
@@ -466,7 +570,8 @@ def send_journal_email(user_email: str, journal_entry: str, style: str):
         'night-cozy': get_night_cozy_template,
         'aggressive': get_aggressive_template,
         'sad': get_sad_template,
-        'super-happy': get_super_happy_template
+        'super-happy': get_super_happy_template,
+        'custom': lambda entry: get_custom_template(entry, custom_background)  # NEW
     }
     
     # Get the template function, default to plain if style not found
