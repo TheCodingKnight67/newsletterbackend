@@ -6,3 +6,4 @@ python-dotenv
 pydantic
 mailjet-rest
 email-validator
+pillow
