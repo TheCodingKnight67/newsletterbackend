@@ -7,3 +7,7 @@ pydantic
 mailjet-rest
 email-validator
 pillow
+anthropic>=0.84.0,<1
+mcp>=1.26.0,<2
+tzdata
+httpx

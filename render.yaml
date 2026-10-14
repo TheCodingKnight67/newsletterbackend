@@ -1,6 +1,10 @@
+# Keep the existing web service deployable without creating new paid resources.
+# Use render.production.yaml explicitly to add the autonomous worker after setting
+# up its shared environment. Both services deploy from this same repository.
 services:
   - type: web
     name: newsletter-backend
-    env: python
+    runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
+    healthCheckPath: /health

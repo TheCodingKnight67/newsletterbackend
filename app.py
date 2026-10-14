@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sendanemail import send_journal_email
@@ -10,18 +10,35 @@ import os
 from dotenv import load_dotenv
 
 from email_service import send_confirmation_email
+from automation_api import router as automation_router, require_admin, limit_submissions
+from sqlalchemy.exc import IntegrityError
+from contextlib import asynccontextmanager
+from production import initialize_database, validate_environment
+from sqlalchemy import text
+from time_utils import utc_now
+from runtime_env import is_production
 
 
 load_dotenv()
-models.Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(app):
+    validate_environment('web')
+    initialize_database()
+    yield
 
-app = FastAPI()
-FRONTEND_URL = os.getenv("FRONTEND_URL")
-print(FRONTEND_URL)
+production_mode = is_production()
+app = FastAPI(lifespan=lifespan, docs_url=None if production_mode else '/docs',
+              redoc_url=None if production_mode else '/redoc', openapi_url=None if production_mode else '/openapi.json')
+app.include_router(automation_router)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+default_origins = FRONTEND_URL
+if production_mode:
+    default_origins += ',https://mailfromfandem.com,https://newsfrontend-seven.vercel.app'
+CORS_ORIGINS = [origin.strip() for origin in os.getenv('CORS_ORIGINS', default_origins).split(',') if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,8 +50,26 @@ def read_root():
     return {"message": "Welcome to the Newsletter API! 💖"}
 
 
+@app.get('/health')
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text('SELECT 1'))
+    except Exception:
+        raise HTTPException(503, 'Database unavailable')
+    return {'status': 'ok'}
+
+
+@app.get('/health/worker')
+def worker_health(db: Session = Depends(get_db)):
+    heartbeat = db.get(models.WorkerHeartbeat, 1)
+    if heartbeat is None or (utc_now() - heartbeat.updated_at).total_seconds() > 600:
+        raise HTTPException(503, 'Worker heartbeat is stale')
+    return {'status': 'ok'}
+
+
 @app.post("/api/subscribe", response_model=schemas.UserResponse)
-def subscribe(user_data: schemas.UserSubscribe, db: Session = Depends(get_db)):
+def subscribe(user_data: schemas.UserSubscribe, request: Request, db: Session = Depends(get_db)):
+    limit_submissions(request, user_data.email, db)
     print("🎬 Starting subscription process...")
 
 
@@ -59,7 +94,11 @@ def subscribe(user_data: schemas.UserSubscribe, db: Session = Depends(get_db)):
 
     print("💾 Saving to database...")
     db.add(new_user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, detail="This character subscription already exists")
     db.refresh(new_user)
     # DON'T CLOSE THE DB! Remove: db.close()
 
@@ -95,6 +134,8 @@ def unsubscribe(token: str, db: Session = Depends(get_db)):
     character = user.character_name
 
     # Delete the user completely
+    db.query(models.EmailJob).filter(models.EmailJob.user_id == user.id, models.EmailJob.status.in_(['queued', 'preview', 'budget_blocked'])).update({'status': 'cancelled'})
+    db.query(models.SubscriptionSchedule).filter_by(user_id=user.id).delete()
     db.delete(user)
     db.commit()
 
@@ -118,42 +159,30 @@ def confirm_subscription(token: str, db: Session = Depends(get_db)):
     user.unsubscribe_token = secrets.token_urlsafe(32)
     db.commit()
 
-
     return {"message": "Subscription confirmed! 🎉"}
 
 
 @app.post("/api/send-journal")
-def send_journal(journal_data: dict):
-    """Send journal entry email without saving to database"""
+def send_journal(journal_data: schemas.JournalRequest, request: Request, db: Session = Depends(get_db)):
+    limit_submissions(request, journal_data.email, db)
     try:
-        email = journal_data.get('email')
-        journal_entry = journal_data.get('journalEntry')
-        style = journal_data.get('style')
-        custom_background = journal_data.get('customBackground')
+        success = send_journal_email(journal_data.email, journal_data.journalEntry,
+                                     journal_data.style, journal_data.customBackground)
+    except Exception:
+        raise HTTPException(502, 'Email provider unavailable')
+    if not success:
+        raise HTTPException(502, 'Email provider did not acknowledge delivery')
+    return {"message": "Journal sent successfully! 💌"}
 
-        if not email or not journal_entry or not style:
-            raise HTTPException(status_code=400, detail="Missing required fields")
 
-
-        success = send_journal_email(email, journal_entry, style, custom_background)
-
-        if success:
-            return {"message": "Journal sent successfully! 💌"}
-        else:
-            raise HTTPException(status_code=500, detail="Failed to send email")
-
-    except Exception as e:
-        print(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("api/users")
+@app.get("/api/users", dependencies=[Depends(require_admin)])
 def get_users(db: Session = Depends(get_db)):
     print("users r here")
     users = db.query(models.User).all()
     return users
 
 
-@app.get("/api/testemail")
+@app.get("/api/testemail", dependencies=[Depends(require_admin)])
 def testemail():
     print("🧪 Testing email service...")
     try:
@@ -173,7 +202,7 @@ def testemail():
         return {"error": str(e)}
 
 
-@app.get("/api/admin/confirmed-user-ids")
+@app.get("/api/admin/confirmed-user-ids", dependencies=[Depends(require_admin)])
 def get_confirmed_user_ids(db: Session = Depends(get_db)):
     """
     Get just the IDs of confirmed users who are ready for emails
@@ -190,7 +219,7 @@ def get_confirmed_user_ids(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/api/admin/all-users")
+@app.get("/api/admin/all-users", dependencies=[Depends(require_admin)])
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).filter(models.User.confirmed == True).all()
 
@@ -218,7 +247,6 @@ def get_all_users(db: Session = Depends(get_db)):
 
 
 
-print("BRIGHTER")
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=1000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "1000")))

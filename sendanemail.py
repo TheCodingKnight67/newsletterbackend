@@ -1,4 +1,5 @@
 from mailjet_rest import Client
+import html
 import os
 from datetime import datetime
 from dotenv import load_dotenv
@@ -576,7 +577,7 @@ def send_journal_email(user_email: str, journal_entry: str, style: str,custom_ba
     
     # Get the template function, default to plain if style not found
     template_func = template_map.get(style, get_plain_template)
-    html_content = template_func(journal_entry)
+    html_content = template_func(html.escape(journal_entry))
     current_date = datetime.now().strftime("%B %d, %Y")  # e.g., "January 15, 2026"
     
     # Subject line based on style with the current date for tracking

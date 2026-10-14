@@ -14,8 +14,6 @@ mailjet = Client(auth=(MAILJET_API_KEY, MAILJET_API_SECRET), version='v3.1')
 
 def send_confirmation_email(user_email: str, confirmation_token: str):
     """Send a confirmation email with a button to confirm subscription"""
-    print(MAILJET_API_KEY, MAILJET_API_SECRET)
-    print("its okay im here dude")
     # The confirmation URL (will be your frontend URL in production)
     frontend_url = os.getenv('FRONTEND_URL')
     confirmation_url = f"{frontend_url}/confirm/{confirmation_token}"

@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: newsletter-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    preDeployCommand: python manage_production.py init-db
+    startCommand: python app.py
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: newsletter-production
+  - type: worker
+    name: newsletter-worker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python automation_worker.py
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - fromGroup: newsletter-production
+
+# Create this shared environment group in Render before syncing the blueprint.
+# Set private credentials through the dashboard; use the EXISTING Supabase database.
+# ENVIRONMENT=production
+# ADMIN_ENDPOINTS_ENABLED=false
+# PROD_DATABASE_URL=<Supabase direct/session-pooler URI on port 5432>
+# FRONTEND_URL=https://<your-frontend-domain>
+# ANTHROPIC_API_KEY=<private>
+# MAILJET_API_KEY=<private>
+# MAILJET_API_SECRET=<private>
+# MAILJET_SENDER_EMAIL=<verified sender>
+# EMAIL_TRANSPORT=mailjet
+# AUTOMATION_MODE=send
+# SCHEDULER_ENABLED=false  (enable after announcement review and release)
