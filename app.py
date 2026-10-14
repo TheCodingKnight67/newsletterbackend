@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from production import initialize_database, validate_environment
 from sqlalchemy import text
 from time_utils import utc_now
-from runtime_env import is_production
+from runtime_env import is_production, deployment_revision
 
 
 load_dotenv()
@@ -56,7 +56,7 @@ def health(db: Session = Depends(get_db)):
         db.execute(text('SELECT 1'))
     except Exception:
         raise HTTPException(503, 'Database unavailable')
-    return {'status': 'ok'}
+    return {'status': 'ok', 'revision': deployment_revision()}
 
 
 @app.get('/health/worker')
