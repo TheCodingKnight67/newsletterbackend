@@ -1,0 +1,19 @@
+# Optional cron service only: the existing web service stays managed separately.
+# Create newsletter-production with the settings in DEPLOYMENT.md before syncing.
+services:
+  - type: cron
+    name: newsletter-email-cron
+    runtime: python
+    branch: main
+    schedule: "*/30 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python automation_worker.py --batch --max-jobs 25 --max-seconds 1200
+    envVars:
+      - fromGroup: newsletter-production
+      - key: AUTOMATION_MODE
+        value: preview
+      - key: SCHEDULER_ENABLED
+        value: "false"
+# After announcement review: change AUTOMATION_MODE to send for release, then
+# SCHEDULER_ENABLED to true after delivery verification. Update this blueprint
+# too if using Blueprint sync, so future syncs preserve the chosen settings.

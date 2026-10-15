@@ -20,7 +20,11 @@ In another terminal in the same directory:
 python automation_worker.py
 # Or process one queued request:
 python automation_worker.py --once
+# Or process a bounded batch and exit (Render cron every 30 minutes):
+python automation_worker.py --batch --max-jobs 25 --max-seconds 1200
 ```
+
+The batch exits when idle, after 25 processed jobs, or before starting another job after 20 minutes. It finishes the current job first. Future retries and remaining jobs wait for the next run. Use `render.cron.yaml` for the optional cron service; see [deployment instructions](DEPLOYMENT.md#recommended-scheduled-render-cron-job). Start with `AUTOMATION_MODE=preview` and `SCHEDULER_ENABLED=false` until the announcement has been prepared and reviewed. Cron and continuous workers must not run against the same database at the same time.
 
 From `newsletter`, run `npm start` with `REACT_APP_API_URL=http://localhost:1000`. Set backend `FRONTEND_URL` to the actual React origin (your other service uses port 3001). Open `/automation`, connect with your `ADMIN_API_TOKEN`, and queue a preview. An Anthropic API key with API credits is required; a Claude chat subscription is separate. Preview generation costs API credits, but never sends the character email. Subscription confirmation emails still use Mailjet.
 

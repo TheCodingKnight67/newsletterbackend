@@ -438,6 +438,65 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(job.status, 'failed')
         self.assertEqual(self.sends, [])
 
+    def test_batch_drains_due_jobs_reuses_profile_and_does_not_resend(self):
+        from threading import Event
+        from automation_worker import run_jobs
+        first, second = self.job('send'), self.job('send')
+        self.settings.mode = 'send'
+        self.assertEqual(run_jobs(self.worker, self.db, Event(), batch=True), 2)
+        self.assertEqual(set(self.sends), {first.id, second.id})
+        self.assertEqual(self.messages.searches, 1)
+        self.assertEqual(run_jobs(self.worker, self.db, Event(), batch=True), 0)
+        self.assertEqual(len(self.sends), 2)
+
+    def test_batch_job_limit_and_future_retry_remain_queued(self):
+        from threading import Event
+        from automation_worker import run_jobs
+        from time_utils import utc_now
+        self.job()
+        self.job()
+        future = self.job()
+        future.available_at = utc_now() + timedelta(hours=1)
+        self.db.commit()
+        self.assertEqual(run_jobs(self.worker, self.db, Event(), batch=True, max_jobs=1), 1)
+        self.assertEqual(self.db.query(models.EmailJob).filter_by(status='queued').count(), 2)
+        self.assertEqual(run_jobs(self.worker, self.db, Event(), batch=True), 1)
+        self.assertEqual(future.status, 'queued')
+
+    def test_batch_time_limit_and_shutdown_finish_current_job(self):
+        from threading import Event
+        from automation_worker import run_jobs
+        from unittest.mock import Mock
+        stopping = Event()
+        worker = Mock()
+        worker.tick.return_value = True
+        with patch('automation_worker.time.monotonic', side_effect=[0, 0, 1200]):
+            self.assertEqual(run_jobs(worker, self.db, stopping, batch=True), 1)
+        worker.tick.assert_called_once()
+        worker.tick.reset_mock()
+        worker.tick.side_effect = lambda db: stopping.set() or True
+        self.assertEqual(run_jobs(worker, self.db, stopping, batch=True), 1)
+        worker.tick.assert_called_once()
+
+    def test_batch_tick_failure_is_not_reported_as_success(self):
+        from threading import Event
+        from automation_worker import run_jobs
+        with patch.object(self.worker, 'tick', side_effect=RuntimeError('database failure')):
+            with self.assertRaisesRegex(RuntimeError, 'database failure'):
+                run_jobs(self.worker, self.db, Event(), batch=True)
+
+    def test_cron_heartbeat_allows_half_hour_between_runs(self):
+        from app import worker_health
+        from time_utils import utc_now
+        from fastapi import HTTPException
+        self.db.add(models.WorkerHeartbeat(id=1, updated_at=utc_now() - timedelta(minutes=35)))
+        self.db.commit()
+        with patch.dict(os.environ, {'WORKER_HEARTBEAT_MAX_AGE_SECONDS': '3600'}):
+            self.assertEqual(worker_health(self.db), {'status': 'ok'})
+        with patch.dict(os.environ, {'WORKER_HEARTBEAT_MAX_AGE_SECONDS': '600'}):
+            with self.assertRaises(HTTPException):
+                worker_health(self.db)
+
     def test_journal_rejects_invalid_recipients_and_external_image_urls(self):
         from schemas import JournalRequest
         from pydantic import ValidationError

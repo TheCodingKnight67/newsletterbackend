@@ -1,4 +1,4 @@
-"""Run from newsbackend: python automation_worker.py [--once]. One worker per database."""
+"""Run continuously, once, or as a bounded --batch cron job. One worker per database."""
 import argparse
 import json
 import logging
@@ -358,9 +358,48 @@ class Worker:
                 for frame in traceback.extract_tb(exc.__traceback__)))
 
 
+def run_jobs(worker, db, stopping, *, batch=False, max_jobs=25, max_seconds=1200):
+    """Finish each in-flight job; batch limits apply before starting the next job."""
+    started = time.monotonic()
+    processed = 0
+    while not stopping.is_set():
+        if batch and (processed >= max_jobs or time.monotonic() - started >= max_seconds):
+            log.info('Batch limit reached; remaining jobs stay queued for the next run')
+            break
+        worker.lock_check()
+        try:
+            found = worker.tick(db)
+        except Exception as exc:
+            db.rollback()
+            log.error('Worker tick failed: %s', type(exc).__name__)
+            if batch:
+                raise  # Render must mark database/scheduling failures as failed runs.
+            stopping.wait(worker.settings.poll_seconds)
+            continue
+        processed += int(found)
+        if batch:
+            if not found:
+                break  # No polling while idle; future retries wait until the next run.
+        else:
+            stopping.wait(worker.settings.poll_seconds)
+    log.info('Worker run finished; processed_jobs=%s', processed)
+    return processed
+
+
+def positive_int(value):
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError('Must be a positive integer')
+    return number
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--once", action="store_true", help="Process at most one queued job")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true", help="Process at most one queued job")
+    mode.add_argument("--batch", action="store_true", help="Process due jobs and exit when idle or at a limit")
+    parser.add_argument('--max-jobs', type=positive_int, default=25, help='Maximum jobs per batch (default: 25)')
+    parser.add_argument('--max-seconds', type=positive_int, default=1200, help='Stop starting jobs after this many seconds (default: 1200)')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     validate_environment('worker')
@@ -372,16 +411,8 @@ def main():
     with worker_lock() as assert_lock, SessionLocal() as db:
         worker.lock_check = assert_lock
         worker.recover(db)
-        while not stopping.is_set():
-            assert_lock()  # A lost session lock is fatal; never continue alongside a new worker.
-            try:
-                worker.tick(db)
-            except Exception as exc:
-                db.rollback()
-                log.error('Worker tick failed: %s', type(exc).__name__)
-            if args.once:
-                break
-            stopping.wait(worker.settings.poll_seconds)
+        run_jobs(worker, db, stopping, batch=args.batch or args.once,
+                 max_jobs=1 if args.once else args.max_jobs, max_seconds=args.max_seconds)
 
 
 if __name__ == "__main__":

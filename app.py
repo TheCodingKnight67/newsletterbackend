@@ -62,7 +62,8 @@ def health(db: Session = Depends(get_db)):
 @app.get('/health/worker')
 def worker_health(db: Session = Depends(get_db)):
     heartbeat = db.get(models.WorkerHeartbeat, 1)
-    if heartbeat is None or (utc_now() - heartbeat.updated_at).total_seconds() > 600:
+    max_age = int(os.getenv('WORKER_HEARTBEAT_MAX_AGE_SECONDS', '600'))
+    if heartbeat is None or (utc_now() - heartbeat.updated_at).total_seconds() > max_age:
         raise HTTPException(503, 'Worker heartbeat is stale')
     return {'status': 'ok'}
 
