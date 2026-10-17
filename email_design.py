@@ -66,12 +66,12 @@ def render_email(job, unsubscribe_url=None, theme=None):
     subject = escape(job.subject or 'A message for you')
     paragraphs = ''.join('<p style="margin:0 0 20px;font-size:17px;line-height:1.75;overflow-wrap:anywhere">' + escape(p).replace('\n', '<br>') + '</p>'
                          for p in re.split(r'\n\s*\n', job.body.strip()))
-    text = job.body + '\n\nAn AI-generated character-inspired message.'
+    text = job.body
     unsubscribe = ''
     if unsubscribe_url:
         if urlsplit(unsubscribe_url).scheme not in {'http', 'https'}:
             raise ValueError('Unsubscribe link must use HTTP or HTTPS')
-        text += '\nUnsubscribe: ' + unsubscribe_url
+        text += '\n\nUnsubscribe: ' + unsubscribe_url
         unsubscribe = f'<p style="margin:12px 0 0"><a href="{escape(unsubscribe_url, quote=True)}" style="color:{ink};text-decoration:underline">Unsubscribe</a></p>'
     markup = f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -87,6 +87,6 @@ def render_email(job, unsubscribe_url=None, theme=None):
 <p style="margin:0;font-size:13px;line-height:1.5">{series}</p></td></tr>
 <tr><td style="padding:30px 28px 12px"><h2 style="margin:0 0 24px;font-size:23px;line-height:1.4;overflow-wrap:anywhere">{subject}</h2>{paragraphs}</td></tr>
 <tr><td style="padding:20px 28px 28px;border-top:1px solid {accent};font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6">
-<p style="margin:0">An AI-generated character-inspired message.</p>{unsubscribe}</td></tr>
+{unsubscribe}</td></tr>
 </table></td></tr></table></body></html>'''
     return text, markup

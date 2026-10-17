@@ -285,7 +285,8 @@ class AutomationTests(unittest.TestCase):
         self.assertNotIn('<script>', markup)
         self.assertIn('&lt;script&gt;', markup)
         self.assertIn('Unsubscribe', text)
-        self.assertIn('AI-generated', markup)
+        self.assertNotIn('AI-generated', markup)
+        self.assertNotIn('AI-generated', text)
 
     def test_generated_design_is_persisted_and_previewed(self):
         job = self.job()
